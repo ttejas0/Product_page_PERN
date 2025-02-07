@@ -6,6 +6,7 @@ import dotenv from "dotenv"; // Importing dotenv to load environment variables
 
 import productRoutes from "./routes/productRoutes.js"; // Importing product-related routes
 import { sql } from "./config/db.js";
+import { aj } from "./lib/arcjet.js";
 
 dotenv.config(); // Load environment variables from .env file
 
