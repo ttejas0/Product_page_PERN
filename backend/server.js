@@ -1,37 +1,40 @@
-import express from "express"; // Importing Express framework
-import helmet from "helmet"; // Importing Helmet for security
-import morgan from "morgan"; // Importing Morgan for request logging
-import cors from "cors"; // Importing CORS to handle cross-origin requests
-import dotenv from "dotenv"; // Importing dotenv to load environment variables
+import express from "express";
+import helmet from "helmet";
+import morgan from "morgan";
+import cors from "cors";
+import dotenv from "dotenv";
+import path from "path";
 
-import productRoutes from "./routes/productRoutes.js"; // Importing product-related routes
+import productRoutes from "./routes/productRoutes.js";
 import { sql } from "./config/db.js";
 import { aj } from "./lib/arcjet.js";
 
-dotenv.config(); // Load environment variables from .env file
+dotenv.config();
 
-const app = express(); // Create an instance of an Express application
-const PORT = process.env.PORT || 3000; // Set the port from environment or default to 3000
+const app = express();
+const PORT = process.env.PORT || 3000;
+const __dirname = path.resolve();
 
-console.log(PORT); // Log the server port to the console
-
-app.use(express.json()); // Middleware to parse incoming JSON requests
-app.use(cors()); // Enable Cross-Origin Resource Sharing
-app.use(helmet()); // helmet is a security middleware that helps you protect your app by setting various HTTP headers
+app.use(express.json());
+app.use(cors());
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+  })
+); // helmet is a security middleware that helps you protect your app by setting various HTTP headers
 app.use(morgan("dev")); // log the requests
 
 // apply arcjet rate-limit to all routes
-
 app.use(async (req, res, next) => {
   try {
     const decision = await aj.protect(req, {
-      request: 1, // specifies that each result consumes 1 token
+      requested: 1, // specifies that each request consumes 1 token
     });
 
     if (decision.isDenied()) {
-      if (decision.reson.isRateLimit()) {
+      if (decision.reason.isRateLimit()) {
         res.status(429).json({ error: "Too Many Requests" });
-      } else if (decision.reson.isBot()) {
+      } else if (decision.reason.isBot()) {
         res.status(403).json({ error: "Bot access denied" });
       } else {
         res.status(403).json({ error: "Forbidden" });
@@ -39,10 +42,10 @@ app.use(async (req, res, next) => {
       return;
     }
 
-    //check for spoofed bots
+    // check for spoofed bots
     if (
       decision.results.some(
-        (results) => results.reason.isBot() && results.reason.isSpoofed()
+        (result) => result.reason.isBot() && result.reason.isSpoofed()
       )
     ) {
       res.status(403).json({ error: "Spoofed bot detected" });
@@ -51,33 +54,42 @@ app.use(async (req, res, next) => {
 
     next();
   } catch (error) {
-    console.error("Arcject error", error);
+    console.log("Arcjet error", error);
     next(error);
   }
 });
 
-app.use("/api/products", productRoutes); // Route for product-related API requests
+app.use("/api/products", productRoutes);
+
+if (process.env.NODE_ENV === "production") {
+  // server our react app
+  app.use(express.static(path.join(__dirname, "/frontend/dist")));
+
+  app.get("*", (req, res) => {
+    res.sendFile(path.resolve(__dirname, "frontend", "dist", "index.html"));
+  });
+}
 
 async function initDB() {
   try {
     await sql`
-            CREATE TABLE IF NOT EXISTS products (
-                id SERIAL PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
-                image VARCHAR(255) NOT NULL,
-                price DECIMAL(10, 2) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        `;
+      CREATE TABLE IF NOT EXISTS products (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        image VARCHAR(255) NOT NULL,
+        price DECIMAL(10, 2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
 
     console.log("Database initialized successfully");
   } catch (error) {
-    console.log("Error initializing database:", error);
+    console.log("Error initDB", error);
   }
 }
 
 initDB().then(() => {
   app.listen(PORT, () => {
-    console.log("Server is running on port " + PORT); // Log server startup message
+    console.log("Server is running on port " + PORT);
   });
 });
